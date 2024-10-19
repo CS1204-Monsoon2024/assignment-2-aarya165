@@ -1,145 +1,142 @@
 #include <iostream>
+#include <cmath>
 #include <vector>
 using namespace std;
 
+// Hash table class
 class HashTable {
 private:
-    struct Node {
+    struct Entry {
         int key;
-        bool deleted; // Just to mark deleted spots
-        Node(int k) : key(k), deleted(false) {}
+        int value;
+        bool isDeleted; // To handle lazy deletion
+        Entry(int k, int v) : key(k), value(v), isDeleted(false) {}
     };
 
-    vector<Node*> table;  // Array of pointers to hold keys
-    int cap;              // Total capacity of the hash table
-    int count;            // How many elements are actually in the table
-    const float loadThreshold = 0.8; // Resize when table is 80% full
-    const int maxAttempts = 10;      // Limit for quadratic probing
+    vector<Entry*> table;  // Array of entry pointers
+    int capacity;          // Current size of the hash table (m)
+    int size;              // Number of elements in the hash table
+    const float loadFactorThreshold = 0.8; // Threshold to trigger resize
 
-    // Simple hash function, key % table size
-    int hashFunc(int key) {
-        return key % cap;
+    // Hash function: h(k) = k % m
+    int hash(int key) {
+        return key % capacity;
     }
 
-    // Quadratic probing (h(k) + i^2) % cap
-    int quadraticProbe(int hashVal, int i) {
-        return (hashVal + i * i) % cap;
+    // Quadratic probing formula: (h(k) + i^2) % m
+    int probe(int hashValue, int i) {
+        return (hashValue + i * i) % capacity;
     }
 
-    // Check if number is prime (needed for resizing)
-    bool isPrime(int num) {
-        if (num <= 1) return false;
-        for (int i = 2; i * i <= num; ++i) {
-            if (num % i == 0) return false;
+    // Check if a number is prime
+    bool isPrime(int n) {
+        if (n <= 1) return false;
+        for (int i = 2; i * i <= n; ++i) {
+            if (n % i == 0) return false;
         }
         return true;
     }
 
-    // Get the next prime number after n
-    int getNextPrime(int num) {
-        while (!isPrime(num)) {
-            ++num;
+    // Find the next prime number greater than n
+    int nextPrime(int n) {
+        while (!isPrime(n)) {
+            ++n;
         }
-        return num;
+        return n;
     }
 
-    // When the table is too full, double the size and rehash everything
-    void resizeTable() {
-        int newCap = getNextPrime(2 * cap); // Find next prime
-        vector<Node*> newTable(newCap, nullptr); // New, bigger table
-        int oldCap = cap;
-        cap = newCap;
-
-        // Rehash all non-deleted entries into new table
-        for (int i = 0; i < oldCap; ++i) {
-            if (table[i] != nullptr && !table[i]->deleted) {
-                int hashVal = hashFunc(table[i]->key);
-                int j = 0, newIdx;
-                // Quadratic probing again to place in new table
+    // Resize the table when load factor exceeds the threshold
+    void resize() {
+        int newCapacity = nextPrime(2 * capacity); // New prime capacity
+        vector<Entry*> newTable(newCapacity, nullptr); // New larger table
+        int oldCapacity = capacity;
+        capacity = newCapacity;
+        
+        for (int i = 0; i < oldCapacity; ++i) {
+            if (table[i] != nullptr && !table[i]->isDeleted) {
+                int hashValue = hash(table[i]->key);
+                int j = 0;
+                int newIndex;
+                // Quadratic probing to rehash entries
                 do {
-                    newIdx = quadraticProbe(hashVal, j);
+                    newIndex = probe(hashValue, j);
                     ++j;
-                } while (newTable[newIdx] != nullptr);
-                newTable[newIdx] = new Node(table[i]->key);
+                } while (newTable[newIndex] != nullptr);
+
+                newTable[newIndex] = new Entry(table[i]->key, table[i]->value);
             }
         }
-        table = move(newTable); // Swap old table with new one
+        
+        table = move(newTable); // Move new table to current table
     }
 
 public:
     // Constructor
-    HashTable(int initSize) {
-        cap = getNextPrime(initSize); // Make sure we start with a prime size
-        table.resize(cap, nullptr);   // Empty table
-        count = 0;
+    HashTable(int initialCapacity) {
+        capacity = nextPrime(initialCapacity); // Initialize with a prime size
+        table.resize(capacity, nullptr);       // Resize table
+        size = 0;
     }
 
-    // Insert key using quadratic probing
-    void insert(int key) {
-        // First check if the key is already there
-        if (search(key) != -1) {
-            cout << "Duplicate key insertion is not allowed" << endl;
-            return;
+    // Insert function with quadratic probing
+    void insert(int key, int value) {
+        // Resize if load factor exceeds threshold
+        if ((float)size / capacity >= loadFactorThreshold) {
+            resize();
         }
 
-        // Resize the table if it's getting full
-        if ((float)count / cap >= loadThreshold) {
-            resizeTable();
-        }
+        int hashValue = hash(key);
+        int i = 0;
+        int index;
+        do {
+            index = probe(hashValue, i);
+            ++i;
+        } while (table[index] != nullptr && !table[index]->isDeleted && table[index]->key != key);
 
-        int hashVal = hashFunc(key);
-        int i = 0, idx;
-        while (i < maxAttempts) {
-            idx = quadraticProbe(hashVal, i);
-            if (table[idx] == nullptr || table[idx]->deleted) {
-                table[idx] = new Node(key);
-                ++count;
+        // Insert or update
+        if (table[index] == nullptr || table[index]->isDeleted) {
+            table[index] = new Entry(key, value);
+            ++size;
+        } else {
+            table[index]->value = value; // Update value if key exists
+        }
+    }
+
+    // Search for a key
+    int search(int key) {
+        int hashValue = hash(key);
+        int i = 0;
+        int index;
+        do {
+            index = probe(hashValue, i);
+            if (table[index] == nullptr) {
+                return -1; // Key not found
+            }
+            if (table[index]->key == key && !table[index]->isDeleted) {
+                return table[index]->value; // Key found
+            }
+            ++i;
+        } while (i < capacity);
+        return -1; // Key not found
+    }
+
+    // Delete a key
+    void remove(int key) {
+        int hashValue = hash(key);
+        int i = 0;
+        int index;
+        do {
+            index = probe(hashValue, i);
+            if (table[index] == nullptr) {
+                return; // Key not found
+            }
+            if (table[index]->key == key && !table[index]->isDeleted) {
+                table[index]->isDeleted = true; // Lazy delete
+                --size;
                 return;
             }
             ++i;
-        }
-        // If we exceed the probing limit
-        cout << "Max probing limit reached!" << endl;
-    }
-
-    // Search for a key in the table, return its index if found, else -1
-    int search(int key) {
-        int hashVal = hashFunc(key);
-        int i = 0, idx;
-        while (i < cap) { // Stop if we've searched the entire table
-            idx = quadraticProbe(hashVal, i);
-            if (table[idx] == nullptr) {
-                return -1; // Not found
-            }
-            if (table[idx]->key == key && !table[idx]->deleted) {
-                return idx; // Found it
-            }
-            ++i;
-        }
-        return -1; // Still not found
-    }
-
-    // Remove a key by marking it as deleted
-    void remove(int key) {
-        int idx = search(key);
-        if (idx == -1) {
-            cout << "Element not found" << endl;
-            return;
-        }
-        table[idx]->deleted = true; // Lazy deletion
-        --count;
-    }
-
-    // Print the table in the specified format
-    void printTable() {
-        for (int i = 0; i < cap; ++i) {
-            if (table[i] == nullptr || table[i]->deleted) {
-                cout << "- ";
-            } else {
-                cout << table[i]->key << " ";
-            }
-        }
-        cout << endl;
+        } while (i < capacity);
     }
 
     // Destructor to clean up memory
@@ -152,29 +149,23 @@ public:
     }
 };
 
-// Example main to show how it works (not the one for grading)
 int main() {
     HashTable ht(5);
 
-    // Insert a few numbers
-    ht.insert(10);
-    ht.insert(20);
-    ht.insert(15);
-    ht.insert(5);
-    ht.insert(3);
+    // Insertions
+    ht.insert(10, 100);
+    ht.insert(20, 200);
+    ht.insert(15, 150);
+    ht.insert(5, 50);
+    ht.insert(3, 30);
 
-    // Print the table
-    ht.printTable();
+    // Search
+    cout << "Value for key 10: " << ht.search(10) << endl;
+    cout << "Value for key 5: " << ht.search(5) << endl;
 
-    // Try inserting a duplicate
-    ht.insert(15);  // Should print "Duplicate key insertion is not allowed"
-
-    // Try removing an element
+    // Deletion
     ht.remove(15);
-    ht.remove(100);  // Should print "Element not found"
-
-    // Print the table again
-    ht.printTable();
+    cout << "Value for key 15 after deletion: " << ht.search(15) << endl;
 
     return 0;
 }
